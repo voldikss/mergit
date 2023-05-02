@@ -1,0 +1,11 @@
+gitlab:
+  url: http://localhost
+  access_token: glpat-54rGpLXt-46P4ZMsmnmz
+  global_policy: poll
+  # projects:
+  #   - id: 2
+  #     path: root/node
+
+poll_interval_s: 5
+
+# vim:ft=yaml
