@@ -21,7 +21,7 @@ func getEffectiveProjects() []*gitlab.Project {
 	configProjects := config.GitLab.Projects
 	if len(configProjects) > 0 {
 		for _, p := range configProjects {
-			log := log.WithFields(log.Fields{"id": p.ID, "path": p.Path})
+			log := log.WithFields(log.Fields{"projectID": p.ID, "projectPath": p.Path})
 			project, _, err := client.Projects.GetProject(p.ID, nil)
 			if err != nil {
 				log.Panicln("failed to get project info")
@@ -30,7 +30,7 @@ func getEffectiveProjects() []*gitlab.Project {
 			if err != nil {
 				log.Panicln("failed to get user info")
 			}
-			if !isUserMaintainProject(user.ID, project.ID) {
+			if !isUserProjectMaintainer(user.ID, project.ID) {
 				log.Panicln("current user is not the maintainer of project")
 			}
 			projects = append(projects, project)
@@ -52,7 +52,7 @@ func listMaintainedProjects() []*gitlab.Project {
 
 	projects := listAllProjects()
 	for _, p := range projects {
-		if isUserMaintainProject(user.ID, p.ID) {
+		if isUserProjectMaintainer(user.ID, p.ID) {
 			maintainedProjects = append(maintainedProjects, p)
 		}
 	}
@@ -60,7 +60,7 @@ func listMaintainedProjects() []*gitlab.Project {
 	return maintainedProjects
 }
 
-func isUserMaintainProject(userID int, projectID int) bool {
+func isUserProjectMaintainer(userID int, projectID int) bool {
 	maintainers := listProjectMaintainers(projectID)
 	if _, ok := maintainers[userID]; ok {
 		return true
@@ -137,7 +137,7 @@ func processProjectMergeRequests(project *gitlab.Project) {
 		}
 
 		if isMergeRequestPipelineRunning(mergeRequest) {
-			log.Infoln("set to merge when pipeline successs")
+			log.Infoln("set to merge when pipeline become success")
 			client.MergeRequests.AcceptMergeRequest(project.ID, mergeRequest.IID, &opts)
 			mergeRequestRunningPipeline = append(mergeRequestRunningPipeline, mergeRequest)
 			continue
@@ -152,7 +152,7 @@ func processProjectMergeRequests(project *gitlab.Project) {
 	// otherwise rebasing is a waste of runner resource
 	if len(mergeRequestRunningPipeline) == 0 {
 		// here we rebase all merge requests and see which will get merged firstly
-		// shoud make a more smart algorithm
+		// shoud make a smarter algorithm
 		for _, mergeRequest := range mergeRequestNeedRebase {
 			if isMergeRequestNeedResolveConflicts(mergeRequest) {
 				continue
@@ -221,7 +221,7 @@ func listProjectMergeRequests(projectID int) []*gitlab.MergeRequest {
 }
 
 func isMergeRequestReady(mergeRequest *gitlab.MergeRequest) bool {
-	return mergeRequest.WorkInProgress || mergeRequest.Draft
+	return !mergeRequest.WorkInProgress && !mergeRequest.Draft
 }
 
 func isMergeRequestNeedResolveConflicts(mergeRequest *gitlab.MergeRequest) bool {
