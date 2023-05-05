@@ -12,3 +12,6 @@ clean:
 
 test:
 	go test -v ./...
+
+docker:
+	docker build -t mergit .
