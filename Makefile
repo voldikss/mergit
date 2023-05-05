@@ -13,5 +13,8 @@ clean:
 test:
 	go test -v ./...
 
-docker:
-	docker build -t mergit .
+tag := $(shell git tag | head -n1)
+build-image:
+	docker build -t mergit:$(tag) .
+push-image:
+	docker push mergit:$(tag)
