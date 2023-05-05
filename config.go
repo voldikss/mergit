@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"io/ioutil"
 	"os"
 
@@ -26,7 +27,11 @@ type Config struct {
 var config Config
 
 func init() {
-	data, err := ioutil.ReadFile("config.yaml")
+	var configFilePath string
+	flag.StringVar(&configFilePath, "config", "config.yaml", "config file absolute path")
+	flag.Parse()
+
+	data, err := ioutil.ReadFile(configFilePath)
 	if err != nil {
 		log.Panicln("failed to read config.yaml file")
 	}

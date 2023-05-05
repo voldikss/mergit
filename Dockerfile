@@ -15,6 +15,5 @@ WORKDIR /app
 ENV TZ Asia/Shanghai
 
 COPY --from=builder /build/mergit /app/mergit
-COPY config.yaml /app/config.yaml
 
 ENTRYPOINT [ "/app/mergit" ]
