@@ -110,8 +110,6 @@ func processProjectMergeRequests(project *gitlab.Project) {
 			log.WithField("mergeRequest", projectMergeRequest.IID).Errorln("failed to get merge request info")
 		}
 
-		log.Infof("processing `%s`\n", mergeRequest.Title)
-
 		// the order of the following checks matters
 		if !isMergeRequestReady(mergeRequest) {
 			log.Debugln("merge request is not ready")
