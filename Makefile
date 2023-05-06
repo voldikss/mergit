@@ -16,9 +16,9 @@ test:
 tag := $(shell git tag | head -n1)
 
 build-image:
-	docker build -t mergit:$(tag) .
-	docker build -t mergit:latest .
+	docker build -t voldikss/mergit:$(tag) .
+	docker build -t voldikss/mergit:latest .
 
 push-image:
-	docker push mergit:$(tag)
-	docker push mergit:latest
+	docker push voldikss/mergit:$(tag)
+	docker push voldikss/mergit:latest
