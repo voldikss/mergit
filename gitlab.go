@@ -62,8 +62,10 @@ func listMaintainedProjects() []*gitlab.Project {
 
 func isUserProjectMaintainer(userID int, projectID int) bool {
 	maintainers := listProjectMaintainers(projectID)
-	if _, ok := maintainers[userID]; ok {
-		return true
+	for _, m := range maintainers {
+		if userID == m.ID {
+			return true
+		}
 	}
 	return false
 }
@@ -91,23 +93,31 @@ func listAllProjects() []*gitlab.Project {
 }
 
 func processProjectMergeRequests(project *gitlab.Project) {
-	maintainers := listProjectMaintainers(project.ID)
+	var (
+		mergeRequestNeedRebase      []*gitlab.MergeRequest
+		mergeRequestRunningPipeline []*gitlab.MergeRequest
+	)
 
-	var mergeRequestNeedRebase = []*gitlab.MergeRequest{}
-	var mergeRequestRunningPipeline = []*gitlab.MergeRequest{}
+	mergeRequests := listProjectMergeRequests(project.ID)
+	log.WithField("projectPath", project.Path).Infoln("merge request count", len(mergeRequests))
 
-	projectMergeRequests := listProjectMergeRequests(project.ID)
-	log.WithField("projectPath", project.Path).Infoln("merge request count", len(projectMergeRequests))
-	for _, projectMergeRequest := range projectMergeRequests {
+	branchMergeRequests := make(map[string][]*gitlab.MergeRequest)
+	branchMergerIDs := make(map[string]MergerIDSet)
+	for _, mr := range mergeRequests {
+		branchMergeRequests[mr.TargetBranch] = append(branchMergeRequests[mr.TargetBranch], mr)
+		branchMergerIDs[mr.TargetBranch] = listEligibleMergers(project.ID, mr.TargetBranch)
+	}
+
+	for _, mr := range mergeRequests {
 		log := log.WithFields(log.Fields{
 			"projectPath":  project.Path,
-			"mergeRequest": projectMergeRequest.Title,
+			"mergeRequest": mr.Title,
 		})
 
 		// because projectMergeRequest lacks some fields
-		mergeRequest, _, err := client.MergeRequests.GetMergeRequest(project.ID, projectMergeRequest.IID, nil)
+		mergeRequest, _, err := client.MergeRequests.GetMergeRequest(project.ID, mr.IID, nil)
 		if err != nil {
-			log.WithField("mergeRequest", projectMergeRequest.IID).Errorln("failed to get merge request info")
+			log.WithField("mergeRequest", mr.IID).Errorln("failed to get merge request info")
 		}
 
 		// the order of the following checks matters
@@ -115,7 +125,7 @@ func processProjectMergeRequests(project *gitlab.Project) {
 			log.Debugln("merge request is not ready")
 			continue
 		}
-		if !isMergeRequestApproved(mergeRequest, project.ID, maintainers) {
+		if !isMergeRequestApproved(mergeRequest, project.ID, branchMergerIDs[mr.TargetBranch]) {
 			log.Debugln("merge request not be appproved")
 			continue
 		}
@@ -164,10 +174,74 @@ func processProjectMergeRequests(project *gitlab.Project) {
 	}
 }
 
-func listProjectMaintainers(projectID int) map[int]*gitlab.ProjectMember {
+func listEligibleMergers(projectID int, branch string) MergerIDSet {
+	var mergerIDSet = make(MergerIDSet)
+
+	for _, m := range listProjectMaintainers(projectID) {
+		mergerIDSet[m.ID] = true
+	}
+
+	protectedBranch, resp, err := client.ProtectedBranches.GetProtectedBranch(projectID, branch)
+
+	if err != nil {
+		// not protected branch
+		// TODO: improve
+		if resp.StatusCode == 404 {
+			for _, m := range append(listProjectMaintainers(projectID), listProjectDevelopers(projectID)...) {
+				mergerIDSet[m.ID] = true
+			}
+			return mergerIDSet
+		} else {
+			log.WithFields(log.Fields{
+				"projectID": projectID,
+				"branch":    branch,
+			}).Errorln("failed to get projected branch info", err)
+		}
+	}
+
+	var branchAccessDescriptions []*gitlab.BranchAccessDescription
+	branchAccessDescriptions = append(branchAccessDescriptions, protectedBranch.MergeAccessLevels...)
+	branchAccessDescriptions = append(branchAccessDescriptions, protectedBranch.PushAccessLevels...)
+	for _, mal := range branchAccessDescriptions {
+		if mal.UserID != 0 {
+			mergerIDSet[mal.UserID] = true
+		} else {
+			switch mal.AccessLevelDescription {
+			case "Maintainers":
+				{
+					// maintainers have been added above
+					continue
+				}
+			case "Developers + Maintainers":
+				{
+					for _, u := range listProjectDevelopers(projectID) {
+						mergerIDSet[u.ID] = true
+					}
+				}
+			case "No one":
+				{
+					continue
+				}
+			default:
+				{
+					log.WithFields(log.Fields{
+						"projectID":              projectID,
+						"branch":                 branch,
+						"accessLevel":            mal.AccessLevel,
+						"accessLevelDescription": mal.AccessLevelDescription,
+					}).Warningln("unknown merge access level")
+				}
+			}
+		}
+	}
+
+	return mergerIDSet
+}
+
+func listProjectMaintainers(projectID int) []*gitlab.ProjectMember {
 	var (
-		mergers = make(map[int]*gitlab.ProjectMember)
-		options = &gitlab.ListProjectMembersOptions{}
+		maintainers []*gitlab.ProjectMember
+		options     = &gitlab.ListProjectMembersOptions{}
 	)
 
 	for {
@@ -177,8 +251,10 @@ func listProjectMaintainers(projectID int) map[int]*gitlab.ProjectMember {
 		}
 
 		for _, member := range members {
-			if hasMergePermission(member) {
-				mergers[member.ID] = member
+			// owner: 50
+			// maintainers: 40
+			if member.AccessLevel >= 40 {
+				maintainers = append(maintainers, member)
 			}
 		}
 		if resp.NextPage == 0 {
@@ -187,7 +263,33 @@ func listProjectMaintainers(projectID int) map[int]*gitlab.ProjectMember {
 		options.Page = resp.NextPage
 	}
 
-	return mergers
+	return maintainers
+}
+
+func listProjectDevelopers(projectID int) []*gitlab.ProjectMember {
+	var (
+		developers []*gitlab.ProjectMember
+		options    = &gitlab.ListProjectMembersOptions{}
+	)
+
+	for {
+		members, resp, err := client.ProjectMembers.ListAllProjectMembers(projectID, options)
+		if err != nil {
+			log.WithFields(log.Fields{"projectID": projectID}).Panicln("failed to get project members")
+		}
+
+		for _, member := range members {
+			if member.AccessLevel == 30 {
+				developers = append(developers, member)
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		options.Page = resp.NextPage
+	}
+
+	return developers
 }
 
 func listProjectMergeRequests(projectID int) []*gitlab.MergeRequest {
@@ -255,7 +357,7 @@ func isMergeRequestPipelineRunning(mergeRequest *gitlab.MergeRequest) bool {
 	return !isMergeRequestPipelineSucceed(mergeRequest) && !isMergeRequestPipelineFailed(mergeRequest)
 }
 
-func isMergeRequestApproved(mergeRequest *gitlab.MergeRequest, projectID int, mergers map[int]*gitlab.ProjectMember) bool {
+func isMergeRequestApproved(mergeRequest *gitlab.MergeRequest, projectID int, mergers MergerIDSet) bool {
 	mergeRequestApprovals, _, err := client.MergeRequestApprovals.GetApprovalState(projectID, mergeRequest.IID, nil)
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -272,9 +374,4 @@ func isMergeRequestApproved(mergeRequest *gitlab.MergeRequest, projectID int, me
 		}
 	}
 	return false
-}
-
-// we assume a user have merge permission if the user is one maintainer of the project
-func hasMergePermission(user *gitlab.ProjectMember) bool {
-	return user.AccessLevel > 30
 }
