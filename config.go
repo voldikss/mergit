@@ -48,23 +48,27 @@ func init() {
 	}
 
 	if loggingLevel := os.Getenv("LOGGING_LEVEL"); len(loggingLevel) > 0 {
-		switch loggingLevel {
-		case "panic", "Panic", "PANIC":
-			log.SetLevel(log.PanicLevel)
-		case "fatal", "Fatal", "FATAL":
-			log.SetLevel(log.FatalLevel)
-		case "error", "Error", "ERROR":
-			log.SetLevel(log.ErrorLevel)
-		case "warn", "Warn", "WARN":
-			log.SetLevel(log.WarnLevel)
-		case "info", "Info", "INFO":
-			log.SetLevel(log.InfoLevel)
-		case "debug", "Debug", "DEBUG":
-			log.SetLevel(log.DebugLevel)
-		case "trace", "Trace", "TRACE":
-			log.SetLevel(log.TraceLevel)
-		default:
-			log.Panicln("unknown logging level:", loggingLevel)
-		}
+		setupLoggingLevel(loggingLevel)
+	}
+}
+
+func setupLoggingLevel(l string) {
+	switch l {
+	case "panic", "Panic", "PANIC":
+		log.SetLevel(log.PanicLevel)
+	case "fatal", "Fatal", "FATAL":
+		log.SetLevel(log.FatalLevel)
+	case "error", "Error", "ERROR":
+		log.SetLevel(log.ErrorLevel)
+	case "warn", "Warn", "WARN":
+		log.SetLevel(log.WarnLevel)
+	case "info", "Info", "INFO":
+		log.SetLevel(log.InfoLevel)
+	case "debug", "Debug", "DEBUG":
+		log.SetLevel(log.DebugLevel)
+	case "trace", "Trace", "TRACE":
+		log.SetLevel(log.TraceLevel)
+	default:
+		log.Panicln("unknown logging level:", l)
 	}
 }
