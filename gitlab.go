@@ -99,7 +99,7 @@ func processProjectMergeRequests(project *gitlab.Project) {
 	)
 
 	mergeRequests := listProjectMergeRequests(project.ID)
-	log.WithField("projectPath", project.Path).Infoln("merge request count", len(mergeRequests))
+	log.WithField("project", project.Path).Infoln("pending merge request count", len(mergeRequests))
 
 	branchMergeRequests := make(map[string][]*gitlab.MergeRequest)
 	branchMergerIDs := make(map[string]MergerIDSet)
@@ -110,8 +110,9 @@ func processProjectMergeRequests(project *gitlab.Project) {
 
 	for _, mr := range mergeRequests {
 		log := log.WithFields(log.Fields{
-			"projectPath":  project.Path,
-			"mergeRequest": mr.Title,
+			"project": project.Path,
+			"title":   mr.Title,
+			"id":      mr.ID,
 		})
 
 		// because projectMergeRequest lacks some fields
@@ -178,7 +179,7 @@ func listEligibleMergers(projectID int, branch string) MergerIDSet {
 	var mergerIDSet = make(MergerIDSet)
 
 	for _, m := range listProjectMaintainers(projectID) {
-		mergerIDSet[m.ID] = true
+		mergerIDSet.Add(m.ID)
 	}
 
 	protectedBranch, resp, err := client.ProtectedBranches.GetProtectedBranch(projectID, branch)
@@ -188,7 +189,7 @@ func listEligibleMergers(projectID int, branch string) MergerIDSet {
 		// TODO: improve
 		if resp.StatusCode == 404 {
 			for _, m := range append(listProjectMaintainers(projectID), listProjectDevelopers(projectID)...) {
-				mergerIDSet[m.ID] = true
+				mergerIDSet.Add(m.ID)
 			}
 			return mergerIDSet
 		} else {
@@ -204,7 +205,7 @@ func listEligibleMergers(projectID int, branch string) MergerIDSet {
 	branchAccessDescriptions = append(branchAccessDescriptions, protectedBranch.PushAccessLevels...)
 	for _, mal := range branchAccessDescriptions {
 		if mal.UserID != 0 {
-			mergerIDSet[mal.UserID] = true
+			mergerIDSet.Add(mal.UserID)
 		} else {
 			switch mal.AccessLevelDescription {
 			case "Maintainers":
@@ -215,7 +216,7 @@ func listEligibleMergers(projectID int, branch string) MergerIDSet {
 			case "Developers + Maintainers":
 				{
 					for _, u := range listProjectDevelopers(projectID) {
-						mergerIDSet[u.ID] = true
+						mergerIDSet.Add(u.ID)
 					}
 				}
 			case "No one":
@@ -368,7 +369,7 @@ func isMergeRequestApproved(mergeRequest *gitlab.MergeRequest, projectID int, me
 
 	for _, approvalRule := range mergeRequestApprovals.Rules {
 		for _, approver := range approvalRule.ApprovedBy {
-			if _, ok := mergers[approver.ID]; ok {
+			if mergers.Has(approver.ID) {
 				return true
 			}
 		}

@@ -1,3 +1,5 @@
+export LOGGING_LEVEL := DEBUG
+
 dev:
 	make build && make run
 
