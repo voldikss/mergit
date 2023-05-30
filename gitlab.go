@@ -31,7 +31,7 @@ func getEffectiveProjects() []*gitlab.Project {
 				log.Panicln("failed to get user info")
 			}
 			if !isUserProjectMaintainer(user.ID, project.ID) {
-				log.Panicln("current user is not the maintainer of project")
+				log.Errorln("current user is not the maintainer of project")
 			}
 			projects = append(projects, project)
 		}
